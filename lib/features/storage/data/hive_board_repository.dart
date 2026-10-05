@@ -27,32 +27,54 @@ class HiveBoardRepository implements BoardRepository {
 
   @override
   Future<void> init() async {
-    if (_metadataBox == null || !_metadataBox!.isOpen) {
-      _metadataBox = await Hive.openBox<Map>(metadataBoxName);
-    }
-    if (_canvasBox == null || !_canvasBox!.isOpen) {
-      _canvasBox = await Hive.openBox<Map>(canvasBoxName);
+    try {
+      if (_metadataBox == null || !_metadataBox!.isOpen) {
+        if (Hive.isBoxOpen(metadataBoxName)) {
+          _metadataBox = Hive.box<Map>(metadataBoxName);
+        } else {
+          _metadataBox = await Hive.openBox<Map>(metadataBoxName);
+        }
+      }
+      if (_canvasBox == null || !_canvasBox!.isOpen) {
+        if (Hive.isBoxOpen(canvasBoxName)) {
+          _canvasBox = Hive.box<Map>(canvasBoxName);
+        } else {
+          _canvasBox = await Hive.openBox<Map>(canvasBoxName);
+        }
+      }
+    } catch (e) {
+      debugPrint('Warning: HiveBoardRepository.init() could not open boxes: $e');
     }
   }
 
   Box<Map> get metadataBox {
-    final box = _metadataBox;
-    if (box == null || !box.isOpen) {
-      throw StateError('HiveBoardRepository has not been initialized. Call init() first.');
+    if (_metadataBox != null && _metadataBox!.isOpen) {
+      return _metadataBox!;
     }
-    return box;
+    if (Hive.isBoxOpen(metadataBoxName)) {
+      _metadataBox = Hive.box<Map>(metadataBoxName);
+      return _metadataBox!;
+    }
+    throw StateError('HiveBoardRepository has not been initialized. Call init() first.');
   }
 
   Box<Map> get canvasBox {
-    final box = _canvasBox;
-    if (box == null || !box.isOpen) {
-      throw StateError('HiveBoardRepository has not been initialized. Call init() first.');
+    if (_canvasBox != null && _canvasBox!.isOpen) {
+      return _canvasBox!;
     }
-    return box;
+    if (Hive.isBoxOpen(canvasBoxName)) {
+      _canvasBox = Hive.box<Map>(canvasBoxName);
+      return _canvasBox!;
+    }
+    throw StateError('HiveBoardRepository has not been initialized. Call init() first.');
   }
 
   @override
   Future<List<BoardMetadata>> getBoards() async {
+    await init();
+    if (_metadataBox == null || !_metadataBox!.isOpen) {
+      return [];
+    }
     final box = metadataBox;
     final List<BoardMetadata> boards = [];
 
@@ -74,6 +96,10 @@ class HiveBoardRepository implements BoardRepository {
 
   @override
   Future<BoardMetadata?> getBoardMetadata(String boardId) async {
+    await init();
+    if (_metadataBox == null || !_metadataBox!.isOpen) {
+      return null;
+    }
     final rawData = metadataBox.get(boardId);
     if (rawData == null) return null;
     return BoardMetadata.fromJson(rawData);
@@ -81,6 +107,10 @@ class HiveBoardRepository implements BoardRepository {
 
   @override
   Future<CanvasData?> getCanvasData(String boardId) async {
+    await init();
+    if (_canvasBox == null || !_canvasBox!.isOpen) {
+      return null;
+    }
     final rawData = canvasBox.get(boardId);
     if (rawData == null) return null;
     return CanvasData.fromJson(rawData);
@@ -91,22 +121,33 @@ class HiveBoardRepository implements BoardRepository {
     required BoardMetadata metadata,
     required CanvasData canvasData,
   }) async {
-    await metadataBox.put(metadata.id, metadata.toJson());
-    await canvasBox.put(canvasData.boardId, canvasData.toJson());
+    await init();
+    if (_metadataBox != null && _metadataBox!.isOpen) {
+      await metadataBox.put(metadata.id, metadata.toJson());
+    }
+    if (_canvasBox != null && _canvasBox!.isOpen) {
+      await canvasBox.put(canvasData.boardId, canvasData.toJson());
+    }
   }
 
   @override
   Future<void> updateMetadata(BoardMetadata metadata) async {
-    await metadataBox.put(metadata.id, metadata.toJson());
+    await init();
+    if (_metadataBox != null && _metadataBox!.isOpen) {
+      await metadataBox.put(metadata.id, metadata.toJson());
+    }
   }
 
   @override
   Future<void> updateCanvasData(CanvasData canvasData) async {
-    await canvasBox.put(canvasData.boardId, canvasData.toJson());
+    await init();
+    if (_canvasBox != null && _canvasBox!.isOpen) {
+      await canvasBox.put(canvasData.boardId, canvasData.toJson());
+    }
 
     // Also update cardCount and updatedAt in metadata if available
     final existingMetadata = await getBoardMetadata(canvasData.boardId);
-    if (existingMetadata != null) {
+    if (existingMetadata != null && _metadataBox != null && _metadataBox!.isOpen) {
       final updated = existingMetadata.copyWith(
         cardCount: canvasData.cards.length,
         updatedAt: canvasData.updatedAt,
@@ -117,8 +158,13 @@ class HiveBoardRepository implements BoardRepository {
 
   @override
   Future<void> deleteBoard(String boardId) async {
-    await metadataBox.delete(boardId);
-    await canvasBox.delete(boardId);
+    await init();
+    if (_metadataBox != null && _metadataBox!.isOpen) {
+      await metadataBox.delete(boardId);
+    }
+    if (_canvasBox != null && _canvasBox!.isOpen) {
+      await canvasBox.delete(boardId);
+    }
 
     // Clean up associated local sandboxed assets
     if (_assetManager != null) {
@@ -131,6 +177,7 @@ class HiveBoardRepository implements BoardRepository {
     required String sourceBoardId,
     required String newTitle,
   }) async {
+    await init();
     final sourceMetadata = await getBoardMetadata(sourceBoardId);
     final sourceCanvas = await getCanvasData(sourceBoardId);
 
